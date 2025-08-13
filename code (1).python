@@ -1,0 +1,183 @@
+import socket
+import threading
+from tkinter import Tk, scrolledtext, Entry, Button, END, messagebox, simpledialog
+
+class ChatServer:
+    def __init__(self):
+        self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.clients = []
+        self.nicknames = []
+        
+        self.create_ui()
+        
+    def create_ui(self):
+        self.root = Tk()
+        self.root.title("Chat Server")
+        
+        # Server configuration frame
+        self.config_frame = Frame(self.root)
+        self.config_frame.pack(padx=10, pady=5)
+        
+        self.host_label = Label(self.config_frame, text="Host:")
+        self.host_label.grid(row=0, column=0)
+        
+        self.host_entry = Entry(self.config_frame, width=15)
+        self.host_entry.insert(0, "127.0.0.1")
+        self.host_entry.grid(row=0, column=1)
+        
+        self.port_label = Label(self.config_frame, text="Port:")
+        self.port_label.grid(row=1, column=0)
+        
+        self.port_entry = Entry(self.config_frame, width=15)
+        self.port_entry.insert(0, "5555")
+        self.port_entry.grid(row=1, column=1)
+        
+        self.start_button = Button(self.config_frame, text="Start Server", command=self.start_server)
+        self.start_button.grid(row=0, column=2, rowspan=2, padx=5)
+        
+        # Chat display
+        self.chat_area = scrolledtext.ScrolledText(self.root, width=40, height=15, state='disabled')
+        self.chat_area.pack(padx=10, pady=5)
+        
+        # Client list
+        self.clients_frame = Frame(self.root)
+        self.clients_frame.pack(padx=10, pady=5)
+        
+        self.clients_label = Label(self.clients_frame, text="Connected Clients:")
+        self.clients_label.pack(side='top', anchor='w')
+        
+        self.clients_listbox = Listbox(self.clients_frame, width=50, height=5)
+        self.clients_listbox.pack(expand=True, fill='both')
+        
+        # Server message entry
+        self.entry_frame = Frame(self.root)
+        self.entry_frame.pack(padx=10, pady=5)
+        
+        self.message_entry = Entry(self.entry_frame, width=40)
+        self.message_entry.pack(side='left')
+        self.message_entry.bind('<Return>', lambda event: self.broadcast_message())
+        
+        self.send_button = Button(self.entry_frame, text="Send", command=self.broadcast_message)
+        self.send_button.pack(side='left', padx=5)
+        
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.root.mainloop()
+    
+    def start_server(self):
+        host = self.host_entry.get()
+        port = int(self.port_entry.get())
+        
+        try:
+            self.server.bind((host, port))
+            self.server.listen()
+            
+            self.start_button.config(state='disabled')
+            self.host_entry.config(state='disabled')
+            self.port_entry.config(state='disabled')
+            
+            self.display_message(f"[SERVER] Started on {host}:{port}")
+            
+            accept_thread = threading.Thread(target=self.accept_clients)
+            accept_thread.start()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to start server: {str(e)}")
+    
+    def accept_clients(self):
+        while True:
+            try:
+                client, address = self.server.accept()
+                
+                client.send("NICK".encode('utf-8'))
+                nickname = client.recv(1024).decode('utf-8')
+                
+                self.clients.append(client)
+                self.nicknames.append(nickname)
+                
+                self.display_message(f"[CONNECTION] {nickname} connected from {address}")
+                self.update_clients_list()
+                
+                broadcast_msg = f"[SERVER] {nickname} joined the chat!".encode('utf-8')
+                self.broadcast(broadcast_msg, client)
+                
+                thread = threading.Thread(target=self.handle_client, args=(client, nickname))
+                thread.start()
+            except:
+                break
+    
+    def handle_client(self, client, nickname):
+        while True:
+            try:
+                message = client.recv(1024)
+                
+                msg_text = message.decode('utf-8')
+                if not message or msg_text.strip() == '':
+                    continue
+                    
+                if msg_text.startswith("QUIT"):
+                    self.remove_client(client, nickname)
+                    break
+                    
+                display_msg = f"[{nickname}] {msg_text}"
+                self.display_message(display_msg)
+                
+                self.broadcast(message, client)
+            except:
+                self.remove_client(client, nickname)
+                break
+    
+    def remove_client(self, client, nickname):
+        if client in self.clients:
+            self.clients.remove(client)
+            client.close()
+            
+        if nickname in self.nicknames:
+            self.nicknames.remove(nickname)
+            
+        self.display_message(f"[DISCONNECT] {nickname} left the chat")
+        self.update_clients_list()
+        
+        broadcast_msg = f"[SERVER] {nickname} left the chat!".encode('utf-8')
+        self.broadcast(broadcast_msg, None)
+    
+    def broadcast(self, message, sender=None):
+        for client in self.clients:
+            if client != sender:
+                try:
+                    client.send(message)
+                except:
+                    self.clients.remove(client)
+    
+    def broadcast_message(self):
+        message = self.message_entry.get()
+        if message.strip() == '':
+            return
+            
+        display_msg = f"[SERVER] {message}"
+        self.display_message(display_msg)
+        
+        self.message_entry.delete(0, END)
+        
+        broadcast_msg = f"[SERVER] {message}".encode('utf-8')
+        self.broadcast(broadcast_msg, None)
+    
+    def display_message(self, message):
+        self.chat_area.config(state='normal')
+        self.chat_area.insert(END, message + "\n")
+        self.chat_area.config(state='disabled')
+        self.chat_area.yview(END)
+    
+    def update_clients_list(self):
+        self.clients_listbox.delete(0, END)
+        for nickname in self.nicknames:
+            self.clients_listbox.insert(END, nickname)
+    
+    def on_closing(self):
+        if messagebox.askokcancel("Quit", "Do you want to close the server?"):
+            for client in self.clients:
+                client.close()
+            self.server.close()
+            self.root.destroy()
+
+if __name__ == "__main__":
+    from tkinter import Frame, Label, Listbox
+    ChatServer()

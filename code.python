@@ -1,0 +1,132 @@
+import socket
+import threading
+from tkinter import Tk, scrolledtext, Entry, Button, END, messagebox, simpledialog, Frame, Label
+
+class ChatClient:
+    def __init__(self):
+        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        
+        self.create_ui()
+    
+    def create_ui(self):
+        self.root = Tk()
+        self.root.title("Chat Client")
+        
+        # Connect frame
+        self.connect_frame = Frame(self.root)
+        self.connect_frame.pack(padx=10, pady=5)
+        
+        self.host_label = Label(self.connect_frame, text="Host:")
+        self.host_label.grid(row=0, column=0)
+        
+        self.host_entry = Entry(self.connect_frame, width=15)
+        self.host_entry.insert(0, "127.0.0.1")
+        self.host_entry.grid(row=0, column=1)
+        
+        self.port_label = Label(self.connect_frame, text="Port:")
+        self.port_label.grid(row=1, column=0)
+        
+        self.port_entry = Entry(self.connect_frame, width=15)
+        self.port_entry.insert(0, "5555")
+        self.port_entry.grid(row=1, column=1)
+        
+        self.nickname_label = Label(self.connect_frame, text="Nickname:")
+        self.nickname_label.grid(row=2, column=0)
+        
+        self.nickname_entry = Entry(self.connect_frame, width=15)
+        self.nickname_entry.insert(0, "User")
+        self.nickname_entry.grid(row=2, column=1)
+        
+        self.connect_button = Button(self.connect_frame, text="Connect", command=self.connect_to_server)
+        self.connect_button.grid(row=0, column=2, rowspan=3, padx=5)
+        
+        # Chat display
+        self.chat_area = scrolledtext.ScrolledText(self.root, width=40, height=15, state='disabled')
+        self.chat_area.pack(padx=10, pady=5)
+        
+        # Message entry
+        self.entry_frame = Frame(self.root)
+        self.entry_frame.pack(padx=10, pady=5)
+        
+        self.message_entry = Entry(self.entry_frame, width=40)
+        self.message_entry.pack(side='left')
+        self.message_entry.bind('<Return>', lambda event: self.send_message())
+        self.message_entry.config(state='disabled')
+        
+        self.send_button = Button(self.entry_frame, text="Send", command=self.send_message)
+        self.send_button.pack(side='left', padx=5)
+        self.send_button.config(state='disabled')
+        
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.root.mainloop()
+    
+    def connect_to_server(self):
+        host = self.host_entry.get()
+        port = int(self.port_entry.get())
+        nickname = self.nickname_entry.get()
+        
+        if nickname.strip() == '':
+            messagebox.showerror("Error", "Nickname cannot be empty")
+            return
+            
+        try:
+            self.client_socket.connect((host, port))
+            
+            self.client_socket.send(nickname.encode('utf-8'))
+            
+            self.connect_button.config(state='disabled')
+            self.host_entry.config(state='disabled')
+            self.port_entry.config(state='disabled')
+            self.nickname_entry.config(state='disabled')
+            
+            self.message_entry.config(state='normal')
+            self.send_button.config(state='normal')
+            
+            receive_thread = threading.Thread(target=self.receive_messages)
+            receive_thread.start()
+            
+            self.display_message("[CLIENT] Connected to the server")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to connect: {str(e)}")
+    
+    def receive_messages(self):
+        while True:
+            try:
+                message = self.client_socket.recv(1024).decode('utf-8')
+                if not message or message.strip() == '':
+                    continue
+                    
+                self.display_message(message)
+            except:
+                self.display_message("[CLIENT] Disconnected from the server")
+                self.client_socket.close()
+                break
+    
+    def send_message(self):
+        message = self.message_entry.get()
+        if message.strip() == '':
+            return
+            
+        try:
+            self.client_socket.send(message.encode('utf-8'))
+            self.message_entry.delete(0, END)
+        except:
+            self.display_message("[CLIENT] Failed to send message")
+    
+    def display_message(self, message):
+        self.chat_area.config(state='normal')
+        self.chat_area.insert(END, message + "\n")
+        self.chat_area.config(state='disabled')
+        self.chat_area.yview(END)
+    
+    def on_closing(self):
+        if messagebox.askokcancel("Quit", "Do you want to quit?"):
+            try:
+                self.client_socket.send("QUIT".encode('utf-8'))
+                self.client_socket.close()
+            except:
+                pass
+            self.root.destroy()
+
+if __name__ == "__main__":
+    ChatClient()
